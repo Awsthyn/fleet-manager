@@ -25,3 +25,11 @@ class ConflictError(DomainError):
 
 class InvalidDataError(DomainError):
     """The change is well-formed but breaks a business rule (e.g. next service before this one)."""
+
+
+class AuthenticationError(DomainError):
+    """Credentials or token are missing, wrong, expired, or belong to an inactive user."""
+
+
+class PermissionDeniedError(DomainError):
+    """The user is authenticated but their role does not allow the operation."""

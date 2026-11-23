@@ -34,7 +34,16 @@ class ReadModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-ErrorCode = Literal["not_found", "conflict", "validation_error", "invalid_data", "http_error"]
+ErrorCode = Literal[
+    "not_found",
+    "conflict",
+    "validation_error",
+    "invalid_data",
+    "unauthorized",
+    "forbidden",
+    "rate_limited",
+    "http_error",
+]
 
 
 class ErrorDetail(BaseModel):
@@ -70,3 +79,6 @@ def _error_response(description: str) -> dict[str, object]:
 NOT_FOUND = {404: _error_response("Resource not found")}
 CONFLICT = {409: _error_response("Unique value already in use")}
 VALIDATION = {422: _error_response("Invalid input")}
+UNAUTHORIZED = {401: _error_response("Missing, invalid or expired credentials")}
+FORBIDDEN = {403: _error_response("Your role does not allow this operation")}
+RATE_LIMITED = {429: _error_response("Too many attempts; see the Retry-After header")}

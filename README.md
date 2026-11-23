@@ -18,6 +18,7 @@ docker compose up -d db
 cp .env.example .env
 
 # Create the schema and load fictional demo data
+# (the seed needs DEMO_PASSWORD, ADMIN_EMAIL and ADMIN_PASSWORD, see .env.example)
 uv run alembic upgrade head
 uv run python -m app.scripts.seed
 
@@ -29,7 +30,26 @@ The API is then available at http://127.0.0.1:8000, with interactive docs at htt
 
 ## API
 
-Interactive documentation lives at `/docs`. Resources under `/api/v1`:
+Interactive documentation lives at `/docs`.
+
+### Authentication
+
+Every `/api/v1` resource requires a bearer token; only `/health`, `/docs`, `/openapi.json` and the login/refresh endpoints are public.
+
+- `POST /api/v1/auth/login` (OAuth2 password flow: form fields `username` = email and `password`) returns a 15-minute access token and a 7-day refresh token. In `/docs`, use the **Authorize** button.
+- `POST /api/v1/auth/refresh` with `{"refresh_token": "..."}` returns a new access token.
+- `GET /api/v1/auth/me` returns the current user.
+
+| Role | Can do |
+|---|---|
+| `viewer` | `GET` on every resource |
+| `admin` | everything |
+
+The seed script creates `demo@fleet.dev` (viewer, password from `DEMO_PASSWORD`) and an admin (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). Passwords are hashed with Argon2 and never stored in the repository. Login is limited to 10 attempts per minute per client IP (kept in process memory, which is enough for a single Render Free instance). Deactivating a user invalidates their outstanding tokens; tokens are otherwise stateless, so there is no per-token logout.
+
+### Resources
+
+Under `/api/v1`:
 
 | Resource | Endpoints | List filters |
 |---|---|---|

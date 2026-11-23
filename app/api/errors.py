@@ -6,7 +6,13 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.schemas.common import ErrorBody, ErrorCode, ErrorDetail, ErrorResponse
-from app.services.errors import ConflictError, InvalidDataError, NotFoundError
+from app.services.errors import (
+    AuthenticationError,
+    ConflictError,
+    InvalidDataError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 
 
 def _respond(
@@ -43,6 +49,24 @@ async def _invalid_data(_: Request, exc: Exception) -> JSONResponse:
     return _respond(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_data", str(exc))
 
 
+async def _unauthenticated(_: Request, exc: Exception) -> JSONResponse:
+    response = _respond(status.HTTP_401_UNAUTHORIZED, "unauthorized", str(exc))
+    response.headers["WWW-Authenticate"] = "Bearer"
+    return response
+
+
+async def _forbidden(_: Request, exc: Exception) -> JSONResponse:
+    return _respond(status.HTTP_403_FORBIDDEN, "forbidden", str(exc))
+
+
+_HTTP_STATUS_CODES: dict[int, ErrorCode] = {
+    status.HTTP_401_UNAUTHORIZED: "unauthorized",
+    status.HTTP_403_FORBIDDEN: "forbidden",
+    status.HTTP_404_NOT_FOUND: "not_found",
+    status.HTTP_429_TOO_MANY_REQUESTS: "rate_limited",
+}
+
+
 async def _request_validation(_: Request, exc: Exception) -> JSONResponse:
     details = _validation_details(exc) if isinstance(exc, RequestValidationError) else None
     return _respond(
@@ -56,7 +80,7 @@ async def _request_validation(_: Request, exc: Exception) -> JSONResponse:
 async def _http_error(_: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, StarletteHTTPException):
         raise exc
-    code: ErrorCode = "not_found" if exc.status_code == status.HTTP_404_NOT_FOUND else "http_error"
+    code = _HTTP_STATUS_CODES.get(exc.status_code, "http_error")
     response = _respond(exc.status_code, code, str(exc.detail))
     if exc.headers:
         response.headers.update(exc.headers)
@@ -67,5 +91,7 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(NotFoundError, _not_found)
     app.add_exception_handler(ConflictError, _conflict)
     app.add_exception_handler(InvalidDataError, _invalid_data)
+    app.add_exception_handler(AuthenticationError, _unauthenticated)
+    app.add_exception_handler(PermissionDeniedError, _forbidden)
     app.add_exception_handler(RequestValidationError, _request_validation)
     app.add_exception_handler(StarletteHTTPException, _http_error)

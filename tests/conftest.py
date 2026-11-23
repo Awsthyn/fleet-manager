@@ -6,15 +6,19 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_settings import SettingsConfigDict
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.api.auth import get_current_user
 from app.core.config import Settings
 from app.db.session import create_engine, get_session
 from app.db.url import asyncpg_engine_options
 from app.main import create_app
+from app.models import User, UserRole
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://fleet:fleet@127.0.0.1:5433/fleet_test"
@@ -22,9 +26,31 @@ TEST_DATABASE_URL = os.environ.get(
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 
+class IsolatedSettings(Settings):
+    """Settings that ignore the developer's local .env, so tests behave the same everywhere."""
+
+    model_config = Settings.model_config | SettingsConfigDict(env_file=None)
+
+
+def isolated_settings(**overrides: object) -> Settings:
+    fields: dict[str, object] = {"ENV": "test"} | overrides
+    return IsolatedSettings.model_validate(fields)
+
+
+def _as_admin() -> User:
+    """Stand-in for get_current_user: an admin, so CRUD tests exercise behavior, not auth.
+
+    Authentication and authorization have their own tests with real tokens (test_auth_api.py),
+    which use ``anonymous_client`` instead.
+    """
+    return User(id=0, email="admin@fleet.test", hashed_password="", role=UserRole.ADMIN)
+
+
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:
-    app = create_app(Settings(ENV="test"))
+    """Client without a database, authenticated as admin."""
+    app = create_app(isolated_settings())
+    app.dependency_overrides[get_current_user] = _as_admin
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
@@ -99,14 +125,28 @@ async def db_session(migrated_database: str) -> AsyncIterator[AsyncSession]:
     await engine.dispose()
 
 
-@pytest.fixture
-async def api_client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
-    """HTTP client whose requests use ``db_session``, so everything is rolled back afterwards."""
-    app = create_app(Settings(ENV="test"))
+def _app_using(db_session: AsyncSession) -> FastAPI:
+    app = create_app(isolated_settings())
 
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = override_session
+    return app
+
+
+@pytest.fixture
+async def api_client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """Client whose requests use ``db_session`` (rolled back afterwards), authenticated as admin."""
+    app = _app_using(db_session)
+    app.dependency_overrides[get_current_user] = _as_admin
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def anonymous_client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """Client using ``db_session`` with real authentication: no token unless the test logs in."""
+    app = _app_using(db_session)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
