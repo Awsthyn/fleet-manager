@@ -27,6 +27,9 @@ class Settings(BaseSettings):
 
     ENV: Literal["development", "test", "production"] = "development"
 
+    # Port the container entrypoint (app/scripts/start.py) listens on. Render sets PORT itself.
+    PORT: int = Field(default=8000, ge=1, le=65535)
+
     # Pooled connection URL, used by the application. Defaults to the docker-compose database.
     # Plain libpq URLs as copied from Neon (postgresql://...?sslmode=require) are accepted;
     # see app/db/url.py for how they are adapted to asyncpg.

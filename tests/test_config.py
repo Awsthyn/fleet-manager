@@ -20,6 +20,18 @@ def test_cors_origins_parses_comma_separated_env(monkeypatch: pytest.MonkeyPatch
     assert settings.CORS_ORIGINS == ["http://localhost:3000", "https://fleet.example.app"]
 
 
+def test_port_comes_from_env_with_8000_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guards the listening port: rejects ignoring Render's PORT, a wrong default, or port 0."""
+    assert _SettingsWithoutDotenv().PORT == 8000
+
+    monkeypatch.setenv("PORT", "10000")
+    assert _SettingsWithoutDotenv().PORT == 10000
+
+    monkeypatch.setenv("PORT", "0")
+    with pytest.raises(ValidationError, match="PORT"):
+        _SettingsWithoutDotenv()
+
+
 def test_production_rejects_dev_jwt_secret() -> None:
     """Guards production boot: rejects starting with ENV=production and the dev JWT secret."""
     with pytest.raises(ValidationError, match="JWT_SECRET"):
