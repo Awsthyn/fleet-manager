@@ -92,3 +92,28 @@ async def test_list_drivers_filters_by_active_flag_and_search(
 
     assert [d["full_name"] for d in active.json()["items"]] == ["Ana Gómez", "Carla Gómez"]
     assert search.json()["total"] == 2
+
+
+async def test_patch_driver_to_an_existing_license_returns_409(
+    api_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Guards license uniqueness on update: rejects taking a license another driver holds."""
+    db_session.add(make_driver(license_number="LIC-TAKEN"))
+    other = make_driver(license_number="LIC-OTHER")
+    db_session.add(other)
+    await db_session.flush()
+
+    response = await api_client.patch(f"{DRIVERS}/{other.id}", json={"license_number": "lic-taken"})
+
+    assert response.status_code == 409
+    assert response.json()["error"]["message"] == (
+        "A driver with license number LIC-TAKEN already exists"
+    )
+
+
+async def test_get_missing_driver_returns_404(api_client: AsyncClient) -> None:
+    """Guards the driver 404: rejects a 200/500 for an unknown driver id."""
+    response = await api_client.get(f"{DRIVERS}/999999")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["message"] == "Driver 999999 not found"

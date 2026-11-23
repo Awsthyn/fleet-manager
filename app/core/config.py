@@ -20,6 +20,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # Validation errors must never echo the input: it holds database URLs and passwords,
+        # and a startup failure is printed straight to the hosting provider's logs.
+        hide_input_in_errors=True,
     )
 
     ENV: Literal["development", "test", "production"] = "development"

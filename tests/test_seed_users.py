@@ -82,3 +82,29 @@ def test_seed_users_from_settings_builds_viewer_and_admin() -> None:
         (DEMO_EMAIL, UserRole.VIEWER),
         ("boss@fleet.test", UserRole.ADMIN),
     ]
+
+
+async def test_seed_users_applies_a_changed_role(db_session: AsyncSession) -> None:
+    """Guards role changes: rejects a user keeping admin rights after the env says viewer."""
+    await seed_users(db_session, [SeedUser("boss@fleet.test", "boss-pass-123", UserRole.ADMIN)])
+
+    result = await seed_users(
+        db_session, [SeedUser("boss@fleet.test", "boss-pass-123", UserRole.VIEWER)]
+    )
+    users = await _users(db_session)
+
+    assert result == (0, 1)
+    assert users["boss@fleet.test"].role is UserRole.VIEWER
+
+
+def test_admin_email_must_differ_from_the_demo_user() -> None:
+    """Guards role separation: rejects an admin account sharing the public demo email."""
+    settings = Settings(
+        ENV="test",
+        DEMO_PASSWORD=SecretStr("demo-pass-123"),
+        ADMIN_EMAIL=DEMO_EMAIL,
+        ADMIN_PASSWORD=SecretStr("admin-pass-456"),
+    )
+
+    with pytest.raises(MissingSeedSettingsError, match="must differ"):
+        seed_users_from_settings(settings)

@@ -19,9 +19,11 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "pre-commit>=4.7.0",
     "pyright>=1.1.414",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.17.6",
 ]
 
@@ -79,6 +81,21 @@ pythonVersion = "3.12"
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
+
+# --- Coverage -----------------------------------------------------------
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+# SQLAlchemy's asyncio layer runs code inside greenlets; without this, coverage loses track of
+# code that resumes after a database call and under-reports services and repositories.
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 80
+exclude_also = ['if __name__ == "__main__":', "if TYPE_CHECKING:"]
 
 # --- Pytest -------------------------------------------------------------
 

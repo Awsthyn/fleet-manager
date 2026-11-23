@@ -145,3 +145,25 @@ async def test_delete_record_returns_204_and_then_404(
 
     assert deleted.status_code == 204
     assert after.status_code == 404
+
+
+async def test_patch_record_changes_only_sent_fields(
+    api_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Guards a valid PATCH: rejects failing, rounding the cost or clearing unsent fields."""
+    record = make_maintenance(make_vehicle(), notes="Original note")
+    db_session.add(record)
+    await db_session.flush()
+
+    response = await api_client.patch(
+        f"{RECORDS}/{record.id}", json={"cost": "123456.78", "next_due_date": None}
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert (body["cost"], body["next_due_date"]) == ("123456.78", None)
+    assert (body["notes"], body["odometer_km"], body["next_due_km"]) == (
+        "Original note",
+        9_000,
+        19_000,
+    )

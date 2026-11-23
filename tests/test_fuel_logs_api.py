@@ -124,3 +124,37 @@ async def test_patch_fuel_log_can_clear_driver(
     assert response.status_code == 200
     assert response.json()["driver_id"] is None
     assert response.json()["liters"] == "40.00"
+
+
+async def test_get_then_delete_fuel_log(api_client: AsyncClient, db_session: AsyncSession) -> None:
+    """Guards fuel log GET/DELETE: rejects a wrong record, non-204 delete or a log left behind."""
+    log = make_fuel_log(make_vehicle())
+    db_session.add(log)
+    await db_session.flush()
+
+    fetched = await api_client.get(f"{FUEL_LOGS}/{log.id}")
+    deleted = await api_client.delete(f"{FUEL_LOGS}/{log.id}")
+    after = await api_client.get(f"{FUEL_LOGS}/{log.id}")
+
+    assert (fetched.status_code, fetched.json()["id"]) == (200, log.id)
+    assert deleted.status_code == 204
+    assert after.status_code == 404
+    assert after.json()["error"]["message"] == f"Fuel log {log.id} not found"
+
+
+async def test_create_fuel_log_for_missing_vehicle_returns_404(api_client: AsyncClient) -> None:
+    """Guards vehicle references: rejects a fuel log for a nonexistent vehicle."""
+    response = await api_client.post(FUEL_LOGS, json=new_log(999_999))
+
+    assert response.status_code == 404
+    assert response.json()["error"]["message"] == "Vehicle 999999 not found"
+
+
+async def test_inverted_fuel_log_date_range_returns_422(api_client: AsyncClient) -> None:
+    """Guards range validation: rejects silently returning nothing when from > to."""
+    response = await api_client.get(
+        FUEL_LOGS, params={"filled_from": "2026-05-01", "filled_to": "2026-04-01"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_data"

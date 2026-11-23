@@ -17,6 +17,8 @@ jobs:
   backend:
     name: Lint, type-check and test
     runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.coverage.outputs.total }}
     env:
       ENV: test
       TEST_DATABASE_URL: postgresql://fleet:fleet@127.0.0.1:5432/fleet_test
@@ -59,5 +61,53 @@ jobs:
       - name: Pyright
         run: uv run pyright
 
-      - name: Pytest
-        run: uv run pytest
+      - name: Pytest with coverage (fails under 80 %)
+        run: >-
+          uv run pytest --cov --cov-report=term --cov-report=xml --cov-report=html
+          --cov-fail-under=80
+
+      - name: Coverage summary
+        id: coverage
+        if: always()
+        run: |
+          uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+          echo "total=$(uv run coverage report --format=total)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+  coverage-badge:
+    # Publishes the coverage figure for the README badge (rendered by shields.io, no paid service).
+    name: Publish coverage badge
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Write badge JSON to the badges branch
+        env:
+          COVERAGE: ${{ needs.backend.outputs.coverage }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if   [ "$COVERAGE" -ge 90 ]; then color=brightgreen
+          elif [ "$COVERAGE" -ge 80 ]; then color=green
+          elif [ "$COVERAGE" -ge 70 ]; then color=yellow
+          else color=red; fi
+          mkdir badges && cd badges
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' \
+            "$COVERAGE" "$color" > coverage.json
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add coverage.json
+          git commit -q -m "Update coverage badge: ${COVERAGE}%"
+          # A single-commit branch, force-pushed: it never accumulates history.
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

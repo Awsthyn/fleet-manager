@@ -1,3 +1,6 @@
+import pytest
+
+from app.core import rate_limit
 from app.core.rate_limit import SlidingWindowRateLimiter
 
 
@@ -38,3 +41,20 @@ def test_blocked_attempts_do_not_extend_the_wait() -> None:
 
     assert retry_after == 30
     assert limiter.hit("ip") is None
+
+
+def test_idle_clients_are_forgotten_once_too_many_are_tracked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guards memory on a 512 MB instance: rejects keeping every IP ever seen forever."""
+    monkeypatch.setattr(rate_limit, "_MAX_TRACKED_KEYS", 3)
+    clock = FakeClock()
+    limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=60, clock=clock)
+
+    for ip in ("a", "b", "c"):
+        limiter.hit(ip)
+    clock.now += 61  # a, b and c are now idle
+    limiter.hit("d")
+    limiter.hit("e")  # fifth key: over the limit, so idle keys are pruned
+
+    assert set(limiter._attempts) == {"d", "e"}  # pyright: ignore[reportPrivateUsage]
