@@ -9,6 +9,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from app.core.config import Settings
+from app.core.proxies import TRUSTED_PROXY_NETWORKS
 from app.db.session import create_engine
 from app.scripts import start
 from tests.conftest import alembic_config, isolated_settings
@@ -68,7 +69,7 @@ def test_server_listens_on_port_setting_and_trusts_proxy_headers(
         "host": "0.0.0.0",  # noqa: S104 - asserting the container's bind address
         "port": 10000,
         "proxy_headers": True,
-        "forwarded_allow_ips": "*",
+        "forwarded_allow_ips": list(TRUSTED_PROXY_NETWORKS),
         "access_log": False,
         "log_config": None,
     }

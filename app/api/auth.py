@@ -59,8 +59,8 @@ def new_login_rate_limiter() -> SlidingWindowRateLimiter:
 async def limit_login_attempts(request: Request) -> None:
     """At most 10 login attempts per client IP per minute (in-process, see app/core/rate_limit).
 
-    Behind Render's proxy the client IP comes from X-Forwarded-For, so Uvicorn must run with
-    --proxy-headers (set up with the deploy); otherwise every client shares the proxy's IP.
+    Behind Render's proxy the client IP comes from X-Forwarded-For, resolved by Uvicorn's proxy
+    headers support against the trusted proxies in app/core/proxies.py (see app/scripts/start.py).
     """
     limiter: SlidingWindowRateLimiter = request.app.state.login_rate_limiter
     client_ip = request.client.host if request.client else "unknown"

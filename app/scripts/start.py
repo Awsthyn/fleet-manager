@@ -17,6 +17,7 @@ from alembic.config import Config
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
+from app.core.proxies import TRUSTED_PROXY_NETWORKS
 
 ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
 
@@ -40,11 +41,11 @@ def serve(settings: Settings) -> None:
         # Inside the container; the platform's proxy is the only thing that can reach it.
         host="0.0.0.0",  # noqa: S104
         port=settings.PORT,
-        # Render terminates TLS and forwards requests from proxy addresses that are not
-        # published, so every proxy is trusted. Without this, request.client is the proxy and
-        # all clients would share one login rate-limit bucket.
+        # Resolve request.client from X-Forwarded-For, trusting only Render's and Cloudflare's
+        # hops (see app/core/proxies.py). Without it every client shares the proxy's address in
+        # the login rate limit; trusting every proxy would let clients spoof their address.
         proxy_headers=True,
-        forwarded_allow_ips="*",
+        forwarded_allow_ips=list(TRUSTED_PROXY_NETWORKS),
         # The app writes its own access log line (with request id) in RequestContextMiddleware.
         access_log=False,
         # Leave logging to the app: uvicorn's records then go through the same (JSON) handler.

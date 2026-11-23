@@ -76,10 +76,10 @@ def test_configure_logging_does_not_stack_handlers() -> None:
     assert len(ours) == 1
 
 
-async def test_access_log_records_client_and_raw_proxy_headers(
+async def test_access_log_records_client_but_not_raw_proxy_headers(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Guards proxy diagnosis: rejects access logs without the client or the forwarded chain."""
+    """Guards the access log: rejects a line without the client or one keeping the raw XFF chain."""
     app = create_app(isolated_settings(ENV="production", JWT_SECRET="x" * 40))
     capsys.readouterr()
     transport = ASGITransport(app=app, client=("10.1.2.3", 4321))
@@ -90,5 +90,5 @@ async def test_access_log_records_client_and_raw_proxy_headers(
     (access,) = [line for line in lines if line["logger"] == "app.access"]
 
     assert access["client"] == "10.1.2.3"
-    assert access["proxy_headers"]["x-forwarded-for"] == "198.51.100.7, 203.0.113.9"
-    assert access["proxy_headers"]["cf-connecting-ip"] is None
+    assert "proxy_headers" not in access
+    assert "198.51.100.7" not in json.dumps(access)
