@@ -74,3 +74,21 @@ def test_configure_logging_does_not_stack_handlers() -> None:
 
     ours = [h for h in logging.getLogger().handlers if h.get_name() == "fleet-manager"]
     assert len(ours) == 1
+
+
+async def test_access_log_records_client_and_raw_proxy_headers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Guards proxy diagnosis: rejects access logs without the client or the forwarded chain."""
+    app = create_app(isolated_settings(ENV="production", JWT_SECRET="x" * 40))
+    capsys.readouterr()
+    transport = ASGITransport(app=app, client=("10.1.2.3", 4321))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.get("/health", headers={"X-Forwarded-For": "198.51.100.7, 203.0.113.9"})
+
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
+    (access,) = [line for line in lines if line["logger"] == "app.access"]
+
+    assert access["client"] == "10.1.2.3"
+    assert access["proxy_headers"]["x-forwarded-for"] == "198.51.100.7, 203.0.113.9"
+    assert access["proxy_headers"]["cf-connecting-ip"] is None
