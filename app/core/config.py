@@ -24,10 +24,12 @@ class Settings(BaseSettings):
 
     ENV: Literal["development", "test", "production"] = "development"
 
-    # Pooled connection URL, used by the application.
-    DATABASE_URL: str = "postgresql+asyncpg://fleet:fleet@localhost:5432/fleet"
+    # Pooled connection URL, used by the application. Defaults to the docker-compose database.
+    # Plain libpq URLs as copied from Neon (postgresql://...?sslmode=require) are accepted;
+    # see app/db/url.py for how they are adapted to asyncpg.
+    DATABASE_URL: str = "postgresql://fleet:fleet@127.0.0.1:5433/fleet"
     # Direct (non-pooled) connection URL, used by Alembic migrations.
-    DATABASE_URL_DIRECT: str = "postgresql+asyncpg://fleet:fleet@localhost:5432/fleet"
+    DATABASE_URL_DIRECT: str = "postgresql://fleet:fleet@127.0.0.1:5433/fleet"
 
     # Comma-separated list in the environment, e.g. "http://localhost:3000,https://example.app".
     CORS_ORIGINS: Annotated[list[str], NoDecode] = Field(
