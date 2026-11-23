@@ -83,6 +83,61 @@ jobs:
             htmlcov/
           retention-days: 14
 
+  docker:
+    # Catches a broken Dockerfile or entrypoint here instead of on Render: builds the image, then
+    # starts it against an empty database and expects the migration to run and /health to answer.
+    name: Docker image (build and smoke test)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: fleet
+          POSTGRES_PASSWORD: fleet
+          POSTGRES_DB: fleet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fleet -d fleet"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t fleet-manager-api:ci .
+
+      - name: Image size
+        run: docker image ls fleet-manager-api:ci --format 'size={{.Size}}'
+
+      - name: Start container (migrate, then serve)
+        run: >-
+          docker run -d --name api --network host
+          -e PORT=8000
+          -e DATABASE_URL=postgresql://fleet:fleet@127.0.0.1:5432/fleet
+          -e DATABASE_URL_DIRECT=postgresql://fleet:fleet@127.0.0.1:5432/fleet
+          -e JWT_SECRET=ci-smoke-test-secret-not-used-anywhere
+          fleet-manager-api:ci
+
+      - name: Wait for /health
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health; then echo; exit 0; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' api)" != "true" ]; then
+              echo "container exited"; exit 1
+            fi
+            sleep 1
+          done
+          echo "no answer from /health after 60 s"; exit 1
+
+      - name: Check the migration ran
+        run: docker logs api 2>&1 | grep -q 'Running upgrade  -> '
+
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
+
   coverage-badge:
     # Publishes the coverage figure for the README badge (rendered by shields.io, no paid service).
     name: Publish coverage badge

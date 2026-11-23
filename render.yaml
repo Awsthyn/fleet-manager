@@ -1,0 +1,47 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repository.
+# Values marked "sync: false" are prompted for on the first Blueprint sync and are then managed in
+# the Render dashboard; they are never stored in this file.
+services:
+  - type: web
+    name: fleet-manager-api
+    runtime: docker
+    plan: free
+    # Same AWS region as the Neon database (us-east-2): keeps each query round trip short.
+    region: ohio
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Liveness only: /health does not touch the database, so health checks never wake Neon.
+    healthCheckPath: /health
+    # Deploy a new commit on main only after its GitHub checks (CI) have passed.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: ENV
+        value: production
+      # Neon pooled URL (host contains "-pooler"), used by the application.
+      - key: DATABASE_URL
+        sync: false
+      # Neon direct URL, used by the migrations that run when the container starts.
+      - key: DATABASE_URL_DIRECT
+        sync: false
+      # Long random value; the app refuses to start in production with the development default.
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "15"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+      # Comma-separated browser origins, e.g. the Vercel dashboard URL. Not secret, but set in the
+      # dashboard because it changes when the frontend is deployed.
+      - key: CORS_ORIGINS
+        sync: false
+      # Read only by the seed script (python -m app.scripts.seed), not by the running API.
+      # Kept here so every variable the project uses is declared in one place.
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # PORT is not declared: Render sets it, and the entrypoint listens on it.

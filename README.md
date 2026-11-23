@@ -150,3 +150,44 @@ The hooks call the Ruff version pinned in `uv.lock`, so local commits and CI nev
 - **Request ids:** every response carries an `X-Request-ID` header. A caller-supplied id (up to 64 characters of letters, digits, `.`, `_`, `-`) is reused; otherwise one is generated. All log lines of a request include it.
 - **Access log:** one `request completed` line per request with method, path (never the query string), status and duration.
 - **Unexpected errors:** the full traceback is logged; the client only gets `500` with `{"error": {"code": "internal_error", "message": "Internal server error"}}` and the request id to quote.
+
+## Deploy
+
+The API runs on [Render](https://render.com/) Free as a Docker web service, against the Neon Free database.
+
+### How it works
+
+- **Image** ([`Dockerfile`](Dockerfile)): multi-stage build. uv installs only the runtime dependencies from `uv.lock` in a build stage; the final `python:3.12-slim` image holds the interpreter, the virtualenv and the code, and runs as a non-root user. [`.dockerignore`](.dockerignore) is an allowlist, so `.env`, `.venv`, `.git` and tests never enter the build.
+- **Start:** the container runs `python -m app.scripts.start`, which applies pending migrations (`alembic upgrade head`, on `DATABASE_URL_DIRECT`) and then starts uvicorn on `$PORT` (default 8000). Render Free has no pre-deploy command, so this happens on every start; when the schema is already current it is a no-op. **If the migration fails, the process exits with status 1 and the server never starts.**
+- **CI:** every push and pull request also builds the image and starts it against an empty PostgreSQL, failing unless the migration runs and `/health` answers. A broken Dockerfile or entrypoint shows up in CI, not on Render.
+- **Blueprint** ([`render.yaml`](render.yaml)): one free web service in Ohio (the same AWS region as the Neon database), health check on `/health`, auto-deploy after CI passes. Secret variables are declared with `sync: false`: Render asks for them on the first sync and they live only in its dashboard.
+
+### First deploy
+
+1. Render dashboard → **New → Blueprint** → select this repository. Confirm the plan is **Free**.
+2. Fill in the prompted variables: `DATABASE_URL` (Neon pooled), `DATABASE_URL_DIRECT` (Neon direct), `JWT_SECRET` (a long random value, e.g. `uv run python -c "import secrets; print(secrets.token_hex(64))"`), `CORS_ORIGINS` (the dashboard origin, comma-separated) and the seed users' variables.
+3. Deploy. The logs show the migration, then `Uvicorn running`.
+4. Load the demo data once from a machine with the Neon URLs in `.env`: `uv run python -m app.scripts.seed` (idempotent).
+
+### Run the image locally
+
+```bash
+docker compose up -d db
+docker build -t fleet-manager-api .
+docker run --rm -p 8000:8000 --network fleet-manager_default \
+  -e DATABASE_URL=postgresql://fleet:fleet@db:5432/fleet \
+  -e DATABASE_URL_DIRECT=postgresql://fleet:fleet@db:5432/fleet \
+  -e JWT_SECRET=any-local-test-value \
+  fleet-manager-api
+curl http://127.0.0.1:8000/health
+```
+
+The image sets `ENV=production` (JSON logs, and a real `JWT_SECRET` is required).
+
+### Free-tier limitations
+
+- **Sleeps after 15 minutes without traffic.** The next request wakes it up, which takes about a minute; Neon's compute also suspends after 5 minutes idle and adds a slower first connection.
+- **Ephemeral disk:** nothing written to the container's filesystem survives a restart or redeploy. All state lives in PostgreSQL.
+- **750 free instance hours per month**, shared by every free service in the workspace. One service running all month uses about 744.
+- **512 MB of RAM:** a single uvicorn worker (about 70 MB at idle).
+- **Client IPs:** Render's proxy addresses are not published, so the app trusts `X-Forwarded-For` from any proxy. The login rate limit is therefore per forwarded client address, best effort rather than a hard guarantee.

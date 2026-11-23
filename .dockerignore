@@ -1,0 +1,12 @@
+# Allowlist: the build context holds only what the image needs. Everything else (.env and other
+# secrets, .venv, .git, tests, caches, coverage output, personal notes) never reaches the builder.
+*
+!pyproject.toml
+!uv.lock
+!alembic.ini
+!app/
+!migrations/
+
+# Bytecode compiled on the host; the image compiles its own.
+**/__pycache__
+**/*.py[cod]
