@@ -40,3 +40,9 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# --- Personal notes (not part of the project) ---
+01-proyecto-a-fleet-manager.md
+
+# --- Claude Code local config and skills ---
+.claude/
