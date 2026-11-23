@@ -159,6 +159,7 @@ The API runs on [Render](https://render.com/) Free as a Docker web service, agai
 
 - **Image** ([`Dockerfile`](Dockerfile)): multi-stage build. uv installs only the runtime dependencies from `uv.lock` in a build stage; the final `python:3.12-slim` image holds the interpreter, the virtualenv and the code, and runs as a non-root user. [`.dockerignore`](.dockerignore) is an allowlist, so `.env`, `.venv`, `.git` and tests never enter the build.
 - **Start:** the container runs `python -m app.scripts.start`, which applies pending migrations (`alembic upgrade head`, on `DATABASE_URL_DIRECT`) and then starts uvicorn on `$PORT` (default 8000). Render Free has no pre-deploy command, so this happens on every start; when the schema is already current it is a no-op. **If the migration fails, the process exits with status 1 and the server never starts.**
+- **CI:** every push and pull request also builds the image and starts it against an empty PostgreSQL, failing unless the migration runs and `/health` answers. A broken Dockerfile or entrypoint shows up in CI, not on Render.
 - **Blueprint** ([`render.yaml`](render.yaml)): one free web service in Ohio (the same AWS region as the Neon database), health check on `/health`, auto-deploy after CI passes. Secret variables are declared with `sync: false`: Render asks for them on the first sync and they live only in its dashboard.
 
 ### First deploy
