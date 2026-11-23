@@ -32,5 +32,5 @@ class FuelLog(Base):
     total_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     odometer_km: Mapped[int]
 
-    vehicle: Mapped["Vehicle"] = relationship(back_populates="fuel_logs")
-    driver: Mapped["Driver | None"] = relationship()
+    vehicle: Mapped["Vehicle"] = relationship(back_populates="fuel_logs", lazy="raise_on_sql")
+    driver: Mapped["Driver | None"] = relationship(lazy="raise_on_sql")
