@@ -48,17 +48,6 @@ def _client_host(scope: Scope) -> str | None:
     return client[0] if client else None
 
 
-# TEMPORARY proxy diagnosis: which headers Render's proxy chain sets, and in which order, so the
-# trusted-proxy configuration can be fixed. Remove once the client IP comes from the right hop.
-_PROXY_DIAGNOSTIC_HEADERS = ("x-forwarded-for", "cf-connecting-ip", "true-client-ip", "x-real-ip")
-
-
-def _proxy_diagnostics(scope: Scope) -> dict[str, object]:
-    return {
-        "proxy_headers": {name: _header(scope, name) for name in _PROXY_DIAGNOSTIC_HEADERS},
-    }
-
-
 class RequestContextMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -111,7 +100,6 @@ class RequestContextMiddleware:
                         "status": status_code,
                         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                         "client": _client_host(scope),
-                        **_proxy_diagnostics(scope),
                     }
                 },
             )
