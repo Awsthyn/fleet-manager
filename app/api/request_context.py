@@ -30,12 +30,33 @@ _INTERNAL_ERROR_BODY = (
 )
 
 
-def _incoming_request_id(scope: Scope) -> str | None:
-    for name, value in scope.get("headers", []):
-        if name == REQUEST_ID_HEADER.encode():
-            candidate = value.decode("latin-1")
-            return candidate if _VALID_REQUEST_ID.match(candidate) else None
+def _header(scope: Scope, name: str) -> str | None:
+    for key, value in scope.get("headers", []):
+        if key == name.encode():
+            return value.decode("latin-1")
     return None
+
+
+def _incoming_request_id(scope: Scope) -> str | None:
+    candidate = _header(scope, REQUEST_ID_HEADER)
+    return candidate if candidate is not None and _VALID_REQUEST_ID.match(candidate) else None
+
+
+def _client_host(scope: Scope) -> str | None:
+    """Client address as resolved by uvicorn (after applying trusted proxy headers)."""
+    client: tuple[str, int] | None = scope.get("client")
+    return client[0] if client else None
+
+
+# TEMPORARY proxy diagnosis: which headers Render's proxy chain sets, and in which order, so the
+# trusted-proxy configuration can be fixed. Remove once the client IP comes from the right hop.
+_PROXY_DIAGNOSTIC_HEADERS = ("x-forwarded-for", "cf-connecting-ip", "true-client-ip", "x-real-ip")
+
+
+def _proxy_diagnostics(scope: Scope) -> dict[str, object]:
+    return {
+        "proxy_headers": {name: _header(scope, name) for name in _PROXY_DIAGNOSTIC_HEADERS},
+    }
 
 
 class RequestContextMiddleware:
@@ -89,6 +110,8 @@ class RequestContextMiddleware:
                         "path": scope["path"],  # no query string: it may carry user input
                         "status": status_code,
                         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                        "client": _client_host(scope),
+                        **_proxy_diagnostics(scope),
                     }
                 },
             )
