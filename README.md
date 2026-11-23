@@ -64,6 +64,21 @@ Under `/api/v1`:
 - **Dates** in filters are calendar days in Argentina time (UTC-3). Money and liters are decimals serialized as strings.
 - **Overdue maintenance:** for each vehicle and maintenance type, only the latest record counts; it is overdue when its `next_due_km` is below the vehicle's odometer or its `next_due_date` has passed.
 
+### Metrics
+
+Read-only, available to viewers, computed in PostgreSQL (`GROUP BY`, `FILTER`, `row_number()`, `LAG()`):
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/v1/metrics/summary` | vehicles by status, active drivers, licenses expiring within 30 days (and already expired), overdue maintenance items and vehicles |
+| `GET /api/v1/metrics/maintenance/upcoming?days=30` | overdue or upcoming maintenance, most urgent first, with the trigger (`date` or `km`) |
+| `GET /api/v1/metrics/costs/monthly?months=6` | maintenance + fuel cost per calendar month (zero-filled), totals and the 5 most expensive vehicles |
+| `GET /api/v1/metrics/fuel/efficiency` | km per liter per vehicle and for the fleet |
+
+- **Km-based due dates** are turned into days using each vehicle's recent usage (km per day across its fuel logs of the last 90 days). Without enough fuel logs, a km trigger is listed only once reached.
+- **Fuel efficiency** uses the full-tank method: the distance between two consecutive fills divided by the liters of the later one, weighted by distance. Fills where the odometer did not advance are ignored.
+- **Months** are calendar months in Argentina time.
+
 ## Database
 
 ### Connection URLs

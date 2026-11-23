@@ -1,39 +1,20 @@
 from datetime import date
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.models import MaintenanceRecord, Vehicle, VehicleStatus, VehicleType
 from app.repositories.base import PageResult, Repository
+from app.repositories.maintenance_queries import is_overdue, latest_records
 
 
 def overdue_vehicle_ids(today: date) -> Select[tuple[int]]:
-    """IDs of vehicles with at least one overdue maintenance.
-
-    For each (vehicle, maintenance type), only the most recent record counts: it is overdue when
-    its next_due_km is below the vehicle's current odometer or its next_due_date has passed.
-    A later service of the same type supersedes an older, now irrelevant due date.
-    """
-    latest = (
-        select(
-            MaintenanceRecord.vehicle_id,
-            MaintenanceRecord.next_due_km,
-            MaintenanceRecord.next_due_date,
-            func.row_number()
-            .over(
-                partition_by=(MaintenanceRecord.vehicle_id, MaintenanceRecord.maintenance_type),
-                order_by=(MaintenanceRecord.performed_at.desc(), MaintenanceRecord.id.desc()),
-            )
-            .label("rank"),
-        )
-    ).subquery()
+    """IDs of vehicles with at least one overdue maintenance (rule in maintenance_queries)."""
+    latest = latest_records()
     return (
         select(latest.c.vehicle_id)
         .join(Vehicle, Vehicle.id == latest.c.vehicle_id)
-        .where(
-            latest.c.rank == 1,
-            or_(latest.c.next_due_km < Vehicle.odometer_km, latest.c.next_due_date < today),
-        )
+        .where(latest.c.rank == 1, is_overdue(latest, today))
         .distinct()
     )
 
