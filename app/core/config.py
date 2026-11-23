@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEV_JWT_SECRET = "dev-only-insecure-jwt-secret-change-me"  # noqa: S105 - development placeholder
@@ -37,8 +37,16 @@ class Settings(BaseSettings):
     )
 
     JWT_SECRET: str = DEV_JWT_SECRET
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, gt=0)
+    # Symmetric algorithms only: the API both issues and verifies its tokens.
+    JWT_ALGORITHM: Literal["HS256", "HS384", "HS512"] = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, gt=0)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, gt=0)
+
+    # Users created by the seed script (python -m app.scripts.seed). Not needed to run the API.
+    # The demo user's email is fixed (demo@fleet.dev) and its role is viewer (read-only).
+    DEMO_PASSWORD: SecretStr | None = None
+    ADMIN_EMAIL: str | None = None
+    ADMIN_PASSWORD: SecretStr | None = None
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

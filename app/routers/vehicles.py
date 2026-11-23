@@ -2,14 +2,24 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from app.api.auth import AdminOnly
 from app.api.deps import VehicleServiceDep
 from app.models import VehicleStatus, VehicleType
-from app.schemas.common import CONFLICT, NOT_FOUND, VALIDATION, Page, Pagination, pagination_params
+from app.schemas.common import (
+    CONFLICT,
+    FORBIDDEN,
+    NOT_FOUND,
+    UNAUTHORIZED,
+    VALIDATION,
+    Page,
+    Pagination,
+    pagination_params,
+)
 from app.schemas.maintenance import MaintenanceRead
 from app.schemas.vehicle import VehicleCreate, VehicleDetail, VehicleRead, VehicleUpdate
 from app.services.vehicle_service import VehicleFilters
 
-router = APIRouter(prefix="/vehicles", tags=["vehicles"], responses={**VALIDATION})
+router = APIRouter(prefix="/vehicles", tags=["vehicles"], responses={**VALIDATION, **UNAUTHORIZED})
 
 
 @router.get("", summary="List vehicles")
@@ -56,7 +66,8 @@ async def list_vehicles(
     "",
     status_code=status.HTTP_201_CREATED,
     summary="Create a vehicle",
-    responses={**NOT_FOUND, **CONFLICT},
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND, **CONFLICT},
 )
 async def create_vehicle(service: VehicleServiceDep, body: VehicleCreate) -> VehicleRead:
     """404 if `assigned_driver_id` does not exist; 409 if the plate is already registered."""
@@ -82,7 +93,8 @@ async def get_vehicle(service: VehicleServiceDep, vehicle_id: int) -> VehicleDet
 @router.patch(
     "/{vehicle_id}",
     summary="Update a vehicle (partial)",
-    responses={**NOT_FOUND, **CONFLICT},
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND, **CONFLICT},
 )
 async def update_vehicle(
     service: VehicleServiceDep, vehicle_id: int, body: VehicleUpdate
@@ -95,7 +107,8 @@ async def update_vehicle(
     "/{vehicle_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a vehicle",
-    responses={**NOT_FOUND},
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
 )
 async def delete_vehicle(service: VehicleServiceDep, vehicle_id: int) -> None:
     """Also deletes the vehicle's maintenance records and fuel logs."""

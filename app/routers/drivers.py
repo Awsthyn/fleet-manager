@@ -2,12 +2,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from app.api.auth import AdminOnly
 from app.api.deps import DriverServiceDep
-from app.schemas.common import CONFLICT, NOT_FOUND, VALIDATION, Page, Pagination, pagination_params
+from app.schemas.common import (
+    CONFLICT,
+    FORBIDDEN,
+    NOT_FOUND,
+    UNAUTHORIZED,
+    VALIDATION,
+    Page,
+    Pagination,
+    pagination_params,
+)
 from app.schemas.driver import DriverCreate, DriverRead, DriverUpdate
 from app.services.driver_service import DriverFilters
 
-router = APIRouter(prefix="/drivers", tags=["drivers"], responses={**VALIDATION})
+router = APIRouter(prefix="/drivers", tags=["drivers"], responses={**VALIDATION, **UNAUTHORIZED})
 
 
 @router.get("", summary="List drivers")
@@ -33,7 +43,11 @@ async def list_drivers(
 
 
 @router.post(
-    "", status_code=status.HTTP_201_CREATED, summary="Create a driver", responses={**CONFLICT}
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a driver",
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **CONFLICT},
 )
 async def create_driver(service: DriverServiceDep, body: DriverCreate) -> DriverRead:
     """409 if the license number is already registered."""
@@ -46,7 +60,10 @@ async def get_driver(service: DriverServiceDep, driver_id: int) -> DriverRead:
 
 
 @router.patch(
-    "/{driver_id}", summary="Update a driver (partial)", responses={**NOT_FOUND, **CONFLICT}
+    "/{driver_id}",
+    summary="Update a driver (partial)",
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND, **CONFLICT},
 )
 async def update_driver(
     service: DriverServiceDep, driver_id: int, body: DriverUpdate
@@ -59,7 +76,8 @@ async def update_driver(
     "/{driver_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a driver",
-    responses={**NOT_FOUND},
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
 )
 async def delete_driver(service: DriverServiceDep, driver_id: int) -> None:
     """Vehicles assigned to the driver become unassigned; their fuel logs keep no driver."""

@@ -3,12 +3,23 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from app.api.auth import AdminOnly
 from app.api.deps import FuelLogServiceDep
-from app.schemas.common import NOT_FOUND, VALIDATION, Page, Pagination, pagination_params
+from app.schemas.common import (
+    FORBIDDEN,
+    NOT_FOUND,
+    UNAUTHORIZED,
+    VALIDATION,
+    Page,
+    Pagination,
+    pagination_params,
+)
 from app.schemas.fuel_log import FuelLogCreate, FuelLogRead, FuelLogUpdate
 from app.services.fuel_log_service import FuelLogFilters
 
-router = APIRouter(prefix="/fuel-logs", tags=["fuel logs"], responses={**VALIDATION})
+router = APIRouter(
+    prefix="/fuel-logs", tags=["fuel logs"], responses={**VALIDATION, **UNAUTHORIZED}
+)
 
 
 @router.get("", summary="List fuel logs")
@@ -38,7 +49,11 @@ async def list_fuel_logs(
 
 
 @router.post(
-    "", status_code=status.HTTP_201_CREATED, summary="Record a fuel fill", responses={**NOT_FOUND}
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a fuel fill",
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
 )
 async def create_fuel_log(service: FuelLogServiceDep, body: FuelLogCreate) -> FuelLogRead:
     """404 if the vehicle or the driver does not exist."""
@@ -50,7 +65,12 @@ async def get_fuel_log(service: FuelLogServiceDep, log_id: int) -> FuelLogRead:
     return FuelLogRead.model_validate(await service.get(log_id))
 
 
-@router.patch("/{log_id}", summary="Update a fuel log (partial)", responses={**NOT_FOUND})
+@router.patch(
+    "/{log_id}",
+    summary="Update a fuel log (partial)",
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
+)
 async def update_fuel_log(
     service: FuelLogServiceDep, log_id: int, body: FuelLogUpdate
 ) -> FuelLogRead:
@@ -61,7 +81,8 @@ async def update_fuel_log(
     "/{log_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a fuel log",
-    responses={**NOT_FOUND},
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
 )
 async def delete_fuel_log(service: FuelLogServiceDep, log_id: int) -> None:
     await service.delete(log_id)

@@ -3,14 +3,25 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from app.api.auth import AdminOnly
 from app.api.deps import MaintenanceServiceDep
 from app.models import MaintenanceType
-from app.schemas.common import NOT_FOUND, VALIDATION, Page, Pagination, pagination_params
+from app.schemas.common import (
+    FORBIDDEN,
+    NOT_FOUND,
+    UNAUTHORIZED,
+    VALIDATION,
+    Page,
+    Pagination,
+    pagination_params,
+)
 from app.schemas.maintenance import MaintenanceCreate, MaintenanceRead, MaintenanceUpdate
 from app.services.maintenance_service import MaintenanceFilters
 
 router = APIRouter(
-    prefix="/maintenance-records", tags=["maintenance records"], responses={**VALIDATION}
+    prefix="/maintenance-records",
+    tags=["maintenance records"],
+    responses={**VALIDATION, **UNAUTHORIZED},
 )
 
 
@@ -43,7 +54,8 @@ async def list_maintenance_records(
     "",
     status_code=status.HTTP_201_CREATED,
     summary="Record a maintenance",
-    responses={**NOT_FOUND},
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
 )
 async def create_maintenance_record(
     service: MaintenanceServiceDep, body: MaintenanceCreate
@@ -58,7 +70,10 @@ async def get_maintenance_record(service: MaintenanceServiceDep, record_id: int)
 
 
 @router.patch(
-    "/{record_id}", summary="Update a maintenance record (partial)", responses={**NOT_FOUND}
+    "/{record_id}",
+    summary="Update a maintenance record (partial)",
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
 )
 async def update_maintenance_record(
     service: MaintenanceServiceDep, record_id: int, body: MaintenanceUpdate
@@ -71,7 +86,8 @@ async def update_maintenance_record(
     "/{record_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a maintenance record",
-    responses={**NOT_FOUND},
+    dependencies=[AdminOnly],
+    responses={**FORBIDDEN, **NOT_FOUND},
 )
 async def delete_maintenance_record(service: MaintenanceServiceDep, record_id: int) -> None:
     await service.delete(record_id)
