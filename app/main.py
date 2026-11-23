@@ -7,7 +7,15 @@ from app import __version__
 from app.api.auth import API_PREFIX, get_current_user, new_login_rate_limiter
 from app.api.errors import register_error_handlers
 from app.core.config import Settings, get_settings
-from app.routers import auth, drivers, fuel_logs, health, maintenance_records, vehicles
+from app.routers import (
+    auth,
+    drivers,
+    fuel_logs,
+    health,
+    maintenance_records,
+    metrics,
+    vehicles,
+)
 
 DESCRIPTION = """
 REST API for managing a vehicle fleet: vehicles, drivers, maintenance and fuel consumption.
@@ -27,6 +35,7 @@ TAGS = [
     {"name": "drivers", "description": "Drivers and their license data."},
     {"name": "maintenance records", "description": "Services performed and when the next is due."},
     {"name": "fuel logs", "description": "Fuel fills per vehicle."},
+    {"name": "metrics", "description": "Aggregated, read-only figures for the dashboard."},
     {"name": "health", "description": "Service liveness."},
 ]
 
@@ -54,7 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Every resource route requires an authenticated user; write routes also require admin.
     resources = APIRouter(dependencies=[Depends(get_current_user)])
-    for module in (vehicles, drivers, maintenance_records, fuel_logs):
+    for module in (vehicles, drivers, maintenance_records, fuel_logs, metrics):
         resources.include_router(module.router)
     api = APIRouter(prefix=API_PREFIX)
     api.include_router(auth.router)

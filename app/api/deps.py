@@ -10,12 +10,14 @@ from app.db.session import get_session
 from app.repositories.driver_repository import DriverRepository
 from app.repositories.fuel_log_repository import FuelLogRepository
 from app.repositories.maintenance_repository import MaintenanceRepository
+from app.repositories.metrics_repository import MetricsRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.vehicle_repository import VehicleRepository
 from app.services.auth_service import AuthService
 from app.services.driver_service import DriverService
 from app.services.fuel_log_service import FuelLogService
 from app.services.maintenance_service import MaintenanceService
+from app.services.metrics_service import MetricsService
 from app.services.vehicle_service import VehicleService
 
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -52,6 +54,13 @@ def fuel_log_service(session: Session) -> FuelLogService:
 
 
 AuthServiceDep = Annotated[AuthService, Depends(auth_service)]
+
+
+def metrics_service(session: Session) -> MetricsService:
+    return MetricsService(MetricsRepository(session))
+
+
+MetricsServiceDep = Annotated[MetricsService, Depends(metrics_service)]
 VehicleServiceDep = Annotated[VehicleService, Depends(vehicle_service)]
 DriverServiceDep = Annotated[DriverService, Depends(driver_service)]
 MaintenanceServiceDep = Annotated[MaintenanceService, Depends(maintenance_service)]
