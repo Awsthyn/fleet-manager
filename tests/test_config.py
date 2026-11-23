@@ -1,5 +1,5 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from pydantic_settings import SettingsConfigDict
 
 from app.core.config import DEV_JWT_SECRET, Settings
@@ -31,3 +31,19 @@ def test_production_accepts_real_jwt_secret() -> None:
     settings = _SettingsWithoutDotenv(ENV="production", JWT_SECRET="a-real-secret-value")
 
     assert settings.JWT_SECRET == "a-real-secret-value"
+
+
+def test_settings_errors_never_echo_secret_values() -> None:
+    """Guards startup logs: rejects validation errors that print database URLs or passwords."""
+    with pytest.raises(ValidationError) as error:
+        _SettingsWithoutDotenv(
+            ENV="production",
+            JWT_SECRET=DEV_JWT_SECRET,
+            DATABASE_URL="postgresql://user:db-secret-123@host/db",
+            ADMIN_PASSWORD=SecretStr("admin-secret-456"),
+        )
+
+    message = str(error.value)
+    assert "JWT_SECRET must be set" in message
+    assert "db-secret-123" not in message
+    assert "admin-secret-456" not in message

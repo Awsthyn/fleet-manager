@@ -43,6 +43,7 @@ ErrorCode = Literal[
     "forbidden",
     "rate_limited",
     "http_error",
+    "internal_error",
 ]
 
 
@@ -82,3 +83,4 @@ VALIDATION = {422: _error_response("Invalid input")}
 UNAUTHORIZED = {401: _error_response("Missing, invalid or expired credentials")}
 FORBIDDEN = {403: _error_response("Your role does not allow this operation")}
 RATE_LIMITED = {429: _error_response("Too many attempts; see the Retry-After header")}
+INTERNAL_ERROR = {500: _error_response("Unexpected server error; quote the X-Request-ID header")}

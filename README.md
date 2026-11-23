@@ -1,5 +1,8 @@
 # fleet-manager
 
+[![CI](https://github.com/Awsthyn/fleet-manager/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Awsthyn/fleet-manager/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Awsthyn/fleet-manager/badges/coverage.json)](https://github.com/Awsthyn/fleet-manager/actions/workflows/ci.yml)
+
 Fleet management REST API built with FastAPI, with a Next.js dashboard, deployed at zero cost.
 
 ## Run locally
@@ -125,5 +128,25 @@ Checks run by CI (where PostgreSQL runs as a service container):
 uv run ruff check .
 uv run ruff format --check .
 uv run pyright
-uv run pytest
+uv run pytest --cov            # coverage report per file; fails below 80 %
 ```
+
+CI fails if total coverage (lines and branches) drops below 80 %, attaches the HTML and XML reports to each run as the `coverage-report` artifact, and on `main` publishes the figure shown in the coverage badge (a JSON file on the `badges` branch, rendered by shields.io). Coverage is measured with greenlet support (`[tool.coverage.run]` in `pyproject.toml`); without it, code that resumes after an async database call is under-reported.
+
+## Development
+
+Run Ruff automatically on every commit with [pre-commit](https://pre-commit.com/) (already a dev dependency):
+
+```bash
+uv run pre-commit install          # once per clone: adds the git hook
+uv run pre-commit run --all-files  # optional: check the whole repository now
+```
+
+The hooks call the Ruff version pinned in `uv.lock`, so local commits and CI never disagree. When a hook fixes a file, the commit stops: review the changes, `git add` them and commit again.
+
+## Logging
+
+- **Format:** one JSON object per line when `ENV=production` (`timestamp`, `level`, `logger`, `message`, `request_id` and event fields); readable text otherwise.
+- **Request ids:** every response carries an `X-Request-ID` header. A caller-supplied id (up to 64 characters of letters, digits, `.`, `_`, `-`) is reused; otherwise one is generated. All log lines of a request include it.
+- **Access log:** one `request completed` line per request with method, path (never the query string), status and duration.
+- **Unexpected errors:** the full traceback is logged; the client only gets `500` with `{"error": {"code": "internal_error", "message": "Internal server error"}}` and the request id to quote.

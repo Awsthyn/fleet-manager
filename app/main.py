@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api.auth import API_PREFIX, get_current_user, new_login_rate_limiter
 from app.api.errors import register_error_handlers
+from app.api.request_context import RequestContextMiddleware
 from app.core.config import Settings, get_settings
+from app.core.logging import configure_logging
 from app.routers import (
     auth,
     drivers,
@@ -16,6 +18,7 @@ from app.routers import (
     metrics,
     vehicles,
 )
+from app.schemas.common import INTERNAL_ERROR
 
 DESCRIPTION = """
 REST API for managing a vehicle fleet: vehicles, drivers, maintenance and fuel consumption.
@@ -24,6 +27,7 @@ REST API for managing a vehicle fleet: vehicles, drivers, maintenance and fuel c
   token. Every `/api/v1` resource requires one. Viewers can read; only admins can write.
 * List endpoints are paginated with `limit` (max 100) and `offset`, and return `items` + `total`.
 * Every error has the same body: `{"error": {"code", "message", "details"}}`.
+* Every response carries an `X-Request-ID` header (send your own to correlate logs).
 * Money and liters are decimals serialized as strings to keep precision.
 
 All data exposed by this service is fictional.
@@ -50,12 +54,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description=DESCRIPTION,
         openapi_tags=TAGS,
     )
+    configure_logging(settings)
+    # Added first so CORS (added next, hence outermost) also wraps the 500 responses it produces.
+    app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
     register_error_handlers(app)
     app.state.settings = settings
@@ -65,7 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resources = APIRouter(dependencies=[Depends(get_current_user)])
     for module in (vehicles, drivers, maintenance_records, fuel_logs, metrics):
         resources.include_router(module.router)
-    api = APIRouter(prefix=API_PREFIX)
+    api = APIRouter(prefix=API_PREFIX, responses={**INTERNAL_ERROR})
     api.include_router(auth.router)
     api.include_router(resources)
     app.include_router(api)

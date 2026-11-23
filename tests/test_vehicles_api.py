@@ -302,3 +302,16 @@ async def test_get_vehicle_includes_driver_and_five_latest_maintenance(
     assert len(dates) == 5
     assert dates == sorted(dates, reverse=True)
     assert dates[0] == today.isoformat()
+
+
+async def test_offset_past_the_end_returns_an_empty_page_with_the_total(
+    api_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Guards the pagination edge: rejects an error or a zero total when offset exceeds the rows."""
+    db_session.add_all([make_vehicle(plate=f"ZZ{n:03d}EN") for n in range(3)])
+    await db_session.flush()
+
+    response = await api_client.get(VEHICLES, params={"limit": 10, "offset": 50})
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "total": 3, "limit": 10, "offset": 50}
