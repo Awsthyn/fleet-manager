@@ -12,7 +12,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.core.config import Settings
-from app.db.session import create_engine
+from app.db.session import create_engine, get_session
 from app.db.url import asyncpg_engine_options
 from app.main import create_app
 
@@ -97,3 +97,16 @@ async def db_session(migrated_database: str) -> AsyncIterator[AsyncSession]:
             await session.close()
             await transaction.rollback()
     await engine.dispose()
+
+
+@pytest.fixture
+async def api_client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """HTTP client whose requests use ``db_session``, so everything is rolled back afterwards."""
+    app = create_app(Settings(ENV="test"))
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = override_session
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac

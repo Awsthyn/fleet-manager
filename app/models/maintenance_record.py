@@ -40,4 +40,6 @@ class MaintenanceRecord(Base):
     next_due_km: Mapped[int | None]
     next_due_date: Mapped[date | None] = mapped_column(Date)
 
-    vehicle: Mapped["Vehicle"] = relationship(back_populates="maintenance_records")
+    vehicle: Mapped["Vehicle"] = relationship(
+        back_populates="maintenance_records", lazy="raise_on_sql"
+    )

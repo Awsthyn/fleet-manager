@@ -21,4 +21,7 @@ class Driver(Base):
     is_active: Mapped[bool] = mapped_column(server_default=true())
     created_at: Mapped[datetime] = created_at_column()
 
-    assigned_vehicles: Mapped[list["Vehicle"]] = relationship(back_populates="assigned_driver")
+    # passive_deletes: the database's ON DELETE SET NULL unassigns vehicles of a deleted driver.
+    assigned_vehicles: Mapped[list["Vehicle"]] = relationship(
+        back_populates="assigned_driver", lazy="raise_on_sql", passive_deletes=True
+    )

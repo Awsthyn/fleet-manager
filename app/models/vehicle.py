@@ -1,3 +1,6 @@
+"""Relationships use lazy="raise_on_sql": with async sessions an implicit lazy load cannot
+run anyway, so code must load what it needs explicitly (selectinload / joinedload)."""
+
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -47,10 +50,18 @@ class Vehicle(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    assigned_driver: Mapped["Driver | None"] = relationship(back_populates="assigned_vehicles")
+    assigned_driver: Mapped["Driver | None"] = relationship(
+        back_populates="assigned_vehicles", lazy="raise_on_sql"
+    )
     maintenance_records: Mapped[list["MaintenanceRecord"]] = relationship(
-        back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="vehicle",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="raise_on_sql",
     )
     fuel_logs: Mapped[list["FuelLog"]] = relationship(
-        back_populates="vehicle", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="vehicle",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="raise_on_sql",
     )

@@ -27,6 +27,23 @@ uv run uvicorn app.main:app --reload
 
 The API is then available at http://127.0.0.1:8000, with interactive docs at http://127.0.0.1:8000/docs and a liveness check at http://127.0.0.1:8000/health.
 
+## API
+
+Interactive documentation lives at `/docs`. Resources under `/api/v1`:
+
+| Resource | Endpoints | List filters |
+|---|---|---|
+| `/vehicles` | list, create, get (with driver and 5 latest maintenance records), patch, delete | `status`, `vehicle_type`, `q` (plate/brand/model), `has_overdue_maintenance` |
+| `/drivers` | list, create, get, patch, delete | `is_active`, `q` (name/license) |
+| `/maintenance-records` | list, create, get, patch, delete | `vehicle_id`, `maintenance_type`, `performed_from`, `performed_to` |
+| `/fuel-logs` | list, create, get, patch, delete | `vehicle_id`, `driver_id`, `filled_from`, `filled_to` |
+
+- **Pagination:** `limit` (1-100, default 20) and `offset`; responses are `{"items", "total", "limit", "offset"}`.
+- **Partial updates:** `PATCH` changes only the fields sent; `null` is accepted only for nullable fields (e.g. `assigned_driver_id: null` unassigns a driver).
+- **Errors** always have the same body, `{"error": {"code", "message", "details"}}`: `404 not_found`, `409 conflict` (duplicate plate or license number), `422 validation_error` (malformed input, with per-field `details`) or `422 invalid_data` (well-formed input that breaks a rule, e.g. next service before this one).
+- **Dates** in filters are calendar days in Argentina time (UTC-3). Money and liters are decimals serialized as strings.
+- **Overdue maintenance:** for each vehicle and maintenance type, only the latest record counts; it is overdue when its `next_due_km` is below the vehicle's odometer or its `next_due_date` has passed.
+
 ## Database
 
 ### Connection URLs
