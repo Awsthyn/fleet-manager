@@ -1,197 +1,153 @@
-# fleet-manager
+# Fleet Manager
+
+Track a vehicle fleet's status, maintenance, fuel costs and driver licenses: a REST API (FastAPI + PostgreSQL) with a Next.js dashboard, deployed entirely on free tiers.
 
 [![CI](https://github.com/Awsthyn/fleet-manager/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Awsthyn/fleet-manager/actions/workflows/ci.yml)
 [![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Awsthyn/fleet-manager/badges/coverage.json)](https://github.com/Awsthyn/fleet-manager/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Fleet management REST API built with FastAPI, with a Next.js dashboard, deployed at zero cost.
+## [▶ Live demo](https://fleet-manager-lake-eight.vercel.app) · [API docs](https://fleet-manager-api-01nn.onrender.com/docs)
+
+- **Dashboard:** click **Try the demo**. No sign-up; read-only access.
+- **API docs (Swagger):** **Authorize** with `demo@fleet.dev` / `demo-password` (read-only viewer).
+- **The first visit can take up to a minute** (about 20 s measured): the API sleeps after 15 idle minutes on Render's free tier. The dashboard shows a "waking up" notice meanwhile.
+
+All data is fictional.
+
+![Dashboard demo](docs/demo.gif)
+
+## What it does
+
+- **See the fleet at a glance:** vehicles by status, overdue maintenance, active drivers and licenses about to expire.
+- **Know what needs service next:** overdue and upcoming maintenance, most urgent first, with the reason ("4,266 km past the service interval", "2 days past due").
+- **Follow costs:** maintenance vs fuel spend per month; the API also reports fuel efficiency (km per liter) per vehicle.
+- **Browse and search vehicles:** filter by status, search by plate, brand or model, and open a vehicle to see its driver and latest maintenance.
+- **Catch expiring licenses:** the drivers page flags active drivers whose license expires within 30 days.
+- **Roles:** viewers read everything; admins also create and edit (the API enforces it on every write).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    B["Browser"] -->|"pages"| PX
+    B -->|"sign in, health ping"| RH
+
+    subgraph V["Vercel Hobby: Next.js 16"]
+        PX["proxy.ts<br/>session routing"] --> SC["Server Components<br/>and Server Actions"]
+        RH["Route handlers<br/>/api/auth/*, /api/health"]
+    end
+
+    SC -->|"Bearer JWT"| CF
+    RH -->|"login, refresh, ping"| CF
+
+    subgraph R["Render Free: Docker"]
+        CF["Cloudflare and Render proxy"] --> API["FastAPI<br/>routers, services, repositories"]
+    end
+
+    API -->|"pooled URL (PgBouncer)"| DB[("Neon Free<br/>PostgreSQL 18")]
+    MIG["On container start:<br/>alembic upgrade head"] -->|"direct URL"| DB
+    GH["GitHub Actions CI"] -.->|"checks pass: auto-deploy"| R
+```
+
+How a request flows (a viewer opens **Vehicles**):
+
+1. The browser requests `/vehicles` from Vercel. `proxy.ts` checks for the session cookies: none → `/login`; refresh cookie only (access token expired) → `/session/resume`, which renews it and comes back.
+2. A Server Component reads the access token from its httpOnly cookie and calls `GET /api/v1/vehicles` on Render with it. The browser never talks to the API or sees a token.
+3. Behind Cloudflare and Render's proxy, Uvicorn resolves the real client address, then FastAPI validates the JWT and the role.
+4. The router calls the vehicle service, the service calls the repository, and the repository runs the queries on Neon: a count, the page, and the drivers in one `IN (...)` query.
+5. The response is rendered to HTML on Vercel and streamed to the browser.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| API | Python 3.12, FastAPI, Pydantic v2, pydantic-settings, uv |
+| Data | PostgreSQL 18 (Neon), SQLAlchemy 2.0 async + asyncpg, Alembic |
+| Auth | JWT (PyJWT, access 15 min + refresh 7 days), Argon2 password hashes (pwdlib) |
+| Dashboard | Next.js 16 (App Router, Cache Components), TypeScript strict, Tailwind CSS 4, shadcn/ui, Recharts |
+| Quality | pytest + httpx, pytest-cov, Ruff, pyright (strict), Vitest + Testing Library, ESLint, pre-commit |
+| Infrastructure | Docker, Render Free (API), Vercel Hobby (dashboard), Neon Free (database), GitHub Actions |
+
+## Engineering decisions
+
+**1. Routers → services → repositories, one direction only.** Routers only translate HTTP, services hold the rules, and repositories are the only code that touches the database session, including commits. Writes run inside savepoints, and constraint violations come back as typed errors (duplicate plate → `409 conflict`) instead of raw database exceptions.
+*Trade-off:* more files and indirection than calling the ORM from the endpoint, which a CRUD this size could get away with.
+
+**2. N+1 queries fail loudly and are measured in a test.** Every relationship is `lazy="raise_on_sql"`, so an accidental lazy load raises instead of silently querying, and the vehicle list loads drivers with `selectinload`. [`tests/test_n_plus_one.py`](tests/test_n_plus_one.py) records every SQL statement while listing 5 and then 25 vehicles and requires the same number of SELECTs both times, at most 3.
+*Trade-off:* every query must declare what it loads up front; forgetting it is a runtime error, caught only if a test exercises that path.
+
+**3. Tokens never reach browser JavaScript.** The dashboard is a backend-for-frontend: Next.js route handlers exchange credentials for tokens and keep them in `httpOnly; Secure; SameSite=Lax` cookies, and pages call the API from the server. Refreshing an expired session is deliberately done from the browser (`/session/resume`): after 15 idle minutes the token is expired *and* the API is asleep, and doing the refresh client-side lets the "waking up" notice show instead of a blank page.
+*Trade-off:* every API call goes through Vercel (an extra hop), and the API sees Vercel's address instead of the visitor's.
+
+**4. Migrations run when the container starts.** Render Free has no pre-deploy step, so the entrypoint ([`app/scripts/start.py`](app/scripts/start.py)) runs `alembic upgrade head` on Neon's direct URL, then starts Uvicorn. If the migration fails, the process exits with status 1 before binding the port: better down than serving a half-migrated schema. CI builds the image and boots it against an empty PostgreSQL on every push.
+*Trade-off:* every cold start pays for an Alembic check (a no-op when current), and this only works with a single instance; several instances would race to migrate.
+
+**5. The login rate limit uses the real client address, found by reading production logs.** Render appends to a client-supplied `X-Forwarded-For` instead of replacing it, so trusting every proxy let anyone dodge the limit with a fake header (verified against the live service). Logging the raw header chain showed `<spoofed>, <client>, <Cloudflare>, <Render 10.x>`, so Uvicorn now trusts only private networks and Cloudflare's published ranges ([`app/core/proxies.py`](app/core/proxies.py)). Only failed logins count, because every demo visitor signs in from the dashboard server's address.
+*Trade-off:* the Cloudflare range list is maintained by hand, and the counters live in process memory (fine for one instance, wrong for several).
+
+**6. Metrics are computed in SQL, not in Python.** Overdue maintenance takes the latest record per vehicle and type with `row_number()`, fuel efficiency pairs consecutive fills with `LAG()`, and costs are grouped by calendar month in Argentina time (UTC-3). Python receives one row per status, month or vehicle; it only shapes them and fills months without data with zeros.
+*Trade-off:* the SQL is harder to read than a loop; every rule is pinned by tests with hand-built fixtures (including superseded records) to keep it correct.
+
+## Quality
+
+| Check | Result |
+|---|---|
+| API tests (pytest, against a real PostgreSQL 18 with all migrations applied) | **144 passed** |
+| API coverage (lines and branches) | **97.79 %**, CI fails below 80 % |
+| Dashboard tests (Vitest) | **5 passed** |
+| Type checking | pyright strict (API), `tsc --noEmit` strict (dashboard) |
+| Lint and format | Ruff (API), ESLint (dashboard) |
+
+Every push and pull request runs four CI jobs: API lint, types and tests with the coverage gate; a Docker build that boots the image against an empty database and expects the migration and `/health` to succeed; dashboard lint, typecheck, tests and build; and, on `main`, the coverage badge. Each API test runs inside a transaction that is rolled back afterwards, and a test fails if the models and migrations drift apart.
 
 ## Run locally
 
-Requires [uv](https://docs.astral.sh/uv/) and, for the local database and the test suite, Docker. uv installs the pinned Python version (see `.python-version`) automatically.
+Requirements: [uv](https://docs.astral.sh/uv/) (installs the pinned Python), Docker, and Node.js 24+. Commands for bash (on Windows, Git Bash).
 
 ```bash
-# Install runtime and development dependencies into .venv
+git clone https://github.com/Awsthyn/fleet-manager.git
+cd fleet-manager
+
+# API: dependencies, local PostgreSQL 18 (127.0.0.1:5433), schema and fictional data
 uv sync
-
-# Start a local PostgreSQL 18 (listens on 127.0.0.1:5433)
 docker compose up -d db
-
-# Optional: create a local config. Without DATABASE_URL / DATABASE_URL_DIRECT,
-# the app uses the docker-compose database.
 cp .env.example .env
-
-# Create the schema and load fictional demo data
-# (the seed needs DEMO_PASSWORD, ADMIN_EMAIL and ADMIN_PASSWORD, see .env.example)
 uv run alembic upgrade head
 uv run python -m app.scripts.seed
-
-# Start the API with auto-reload
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload       # http://127.0.0.1:8000/docs
 ```
 
-The API is then available at http://127.0.0.1:8000, with interactive docs at http://127.0.0.1:8000/docs and a liveness check at http://127.0.0.1:8000/health.
-
-## Dashboard
-
-A Next.js dashboard in [`web/`](web/) (overview metrics and costs chart, vehicles, drivers, one-click read-only demo), deployed on Vercel Hobby. The browser never calls the API directly: the Next.js server does, with tokens kept in httpOnly cookies. Setup, scripts and design notes: [web/README.md](web/README.md).
-
-## API
-
-Interactive documentation lives at `/docs`.
-
-### Authentication
-
-Every `/api/v1` resource requires a bearer token; only `/health`, `/docs`, `/openapi.json` and the login/refresh endpoints are public.
-
-- `POST /api/v1/auth/login` (OAuth2 password flow: form fields `username` = email and `password`) returns a 15-minute access token and a 7-day refresh token. In `/docs`, use the **Authorize** button.
-- `POST /api/v1/auth/refresh` with `{"refresh_token": "..."}` returns a new access token.
-- `GET /api/v1/auth/me` returns the current user.
-
-| Role | Can do |
-|---|---|
-| `viewer` | `GET` on every resource |
-| `admin` | everything |
-
-The seed script creates `demo@fleet.dev` (viewer, password from `DEMO_PASSWORD`) and an admin (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). Passwords are hashed with Argon2 and never stored in the repository. Login is limited to 10 failed attempts per minute per client IP (kept in process memory, which is enough for a single Render Free instance). Successful logins do not count, so the dashboard's server, which signs in every demo visitor from the same address, is not throttled; each attempt still reserves a slot while it is checked, so a burst of concurrent guesses cannot get past the limit. Deactivating a user invalidates their outstanding tokens; tokens are otherwise stateless, so there is no per-token logout.
-
-### Resources
-
-Under `/api/v1`:
-
-| Resource | Endpoints | List filters |
-|---|---|---|
-| `/vehicles` | list, create, get (with driver and 5 latest maintenance records), patch, delete | `status`, `vehicle_type`, `q` (plate/brand/model), `has_overdue_maintenance` |
-| `/drivers` | list, create, get, patch, delete | `is_active`, `q` (name/license) |
-| `/maintenance-records` | list, create, get, patch, delete | `vehicle_id`, `maintenance_type`, `performed_from`, `performed_to` |
-| `/fuel-logs` | list, create, get, patch, delete | `vehicle_id`, `driver_id`, `filled_from`, `filled_to` |
-
-- **Pagination:** `limit` (1-100, default 20) and `offset`; responses are `{"items", "total", "limit", "offset"}`.
-- **Partial updates:** `PATCH` changes only the fields sent; `null` is accepted only for nullable fields (e.g. `assigned_driver_id: null` unassigns a driver).
-- **Errors** always have the same body, `{"error": {"code", "message", "details"}}`: `404 not_found`, `409 conflict` (duplicate plate or license number), `422 validation_error` (malformed input, with per-field `details`) or `422 invalid_data` (well-formed input that breaks a rule, e.g. next service before this one).
-- **Dates** in filters are calendar days in Argentina time (UTC-3). Money and liters are decimals serialized as strings.
-- **Overdue maintenance:** for each vehicle and maintenance type, only the latest record counts; it is overdue when its `next_due_km` is below the vehicle's odometer or its `next_due_date` has passed.
-
-### Metrics
-
-Read-only, available to viewers, computed in PostgreSQL (`GROUP BY`, `FILTER`, `row_number()`, `LAG()`):
-
-| Endpoint | Returns |
-|---|---|
-| `GET /api/v1/metrics/summary` | vehicles by status, active drivers, licenses expiring within 30 days (and already expired), overdue maintenance items and vehicles |
-| `GET /api/v1/metrics/maintenance/upcoming?days=30` | overdue or upcoming maintenance, most urgent first, with the trigger (`date` or `km`) |
-| `GET /api/v1/metrics/costs/monthly?months=6` | maintenance + fuel cost per calendar month (zero-filled), totals and the 5 most expensive vehicles |
-| `GET /api/v1/metrics/fuel/efficiency` | km per liter per vehicle and for the fleet |
-
-- **Km-based due dates** are turned into days using each vehicle's recent usage (km per day across its fuel logs of the last 90 days). Without enough fuel logs, a km trigger is listed only once reached.
-- **Fuel efficiency** uses the full-tank method: the distance between two consecutive fills divided by the liters of the later one, weighted by distance. Fills where the odometer did not advance are ignored.
-- **Months** are calendar months in Argentina time.
-
-## Database
-
-### Connection URLs
-
-| Variable | Used by | On Neon |
-|---|---|---|
-| `DATABASE_URL` | the application | pooled endpoint ("Connection pooling" on, host contains `-pooler`) |
-| `DATABASE_URL_DIRECT` | Alembic migrations | direct endpoint ("Connection pooling" off) |
-
-Paste the URLs exactly as Neon shows them (`postgresql://...?sslmode=require&channel_binding=require`). The asyncpg driver does not accept libpq query parameters, so [app/db/url.py](app/db/url.py) adapts them at startup:
-
-- the scheme becomes `postgresql+asyncpg://`;
-- `sslmode` is removed from the URL and passed to asyncpg as its `ssl` argument (same mode names, so TLS stays enforced);
-- `channel_binding` has no asyncpg equivalent and is dropped;
-- on pooled hosts (PgBouncer in transaction mode), asyncpg's prepared-statement cache is disabled and statements get unique names, avoiding collisions between clients sharing a server connection.
-
-Migrations go through the direct endpoint because DDL and Alembic's session-level state do not belong behind a transaction-mode pooler.
-
-### Migrations
+In a second terminal:
 
 ```bash
-uv run alembic upgrade head                                 # apply all migrations
-uv run alembic downgrade -1                                 # roll back the latest one
-uv run alembic revision --autogenerate -m "describe change" # new migration from model changes
+cd fleet-manager/web
+npm install
+cp .env.example .env.local
+npm run dev                                # http://localhost:3000 → Try the demo
 ```
 
-Always review an autogenerated migration before committing it. Autogenerate does not drop PostgreSQL enum types on downgrade, among other gaps; the initial migration documents what was fixed by hand. The test suite fails if the models and the migrations drift apart.
+The example files work together as they are: the seed creates `demo@fleet.dev` with the same placeholder password the dashboard uses. Tests: `uv run pytest` (needs the docker-compose database) and `npm test` in `web/`.
 
-### Seed data
+More detail: [API reference](docs/api.md) · [Operations: database, tests, logging, deploy](docs/operations.md) · [Dashboard](web/README.md)
 
-```bash
-uv run python -m app.scripts.seed
-```
+## Limitations & what I'd do next
 
-Loads fictional data into `DATABASE_URL`: 25 vehicles, 12 drivers (some with licenses expiring within 30 days) and six months of maintenance records and fuel logs, with a few vehicles overdue for service. A fixed random seed makes the data reproducible; dates are relative to the day it runs. The script is idempotent: running it again inserts nothing new.
+**Limitations**
 
-## Tests
+- **Cold starts:** after 15 idle minutes the API sleeps; the first request took 22.4 s in a measurement (up to a minute is possible), and Neon's compute adds a slower first query after 5 idle minutes.
+- **Single instance by design:** login rate-limit counters live in process memory and migrations run on start, both correct only with one API instance (which is all Render Free gives).
+- **No per-token logout:** tokens are stateless JWTs. Signing out clears the cookies, but a copied refresh token stays valid for up to 7 days unless the user is deactivated.
+- **Dashboard scope:** it edits vehicles only; maintenance records, fuel logs and drivers are managed through the API.
+- **Free-tier quotas:** 750 Render instance hours per month and 1 GB of Neon storage.
 
-The suite needs the docker-compose database (`docker compose up -d db`). It creates a separate `fleet_test` database, applies the Alembic migrations to it and runs each test inside a transaction that is rolled back afterwards. Set `TEST_DATABASE_URL` to use another server.
+**Next**
 
-Checks run by CI (where PostgreSQL runs as a service container):
+1. **Refresh-token rotation with revocation in PostgreSQL**, so signing out really invalidates a session and stolen refresh tokens are detected on reuse.
+2. **Move the rate-limit counters to PostgreSQL**, the only state shared between instances on this stack, to make horizontal scaling safe.
+3. **Browser end-to-end tests in CI** (Playwright against the docker-compose stack) for login, the session refresh and the admin forms, which are currently verified by hand.
 
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest --cov            # coverage report per file; fails below 80 %
-```
+## Attributions & license
 
-CI fails if total coverage (lines and branches) drops below 80 %, attaches the HTML and XML reports to each run as the `coverage-report` artifact, and on `main` publishes the figure shown in the coverage badge (a JSON file on the `badges` branch, rendered by shields.io). Coverage is measured with greenlet support (`[tool.coverage.run]` in `pyproject.toml`); without it, code that resumes after an async database call is under-reported.
+Built with [FastAPI](https://fastapi.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/), [Next.js](https://nextjs.org/), [shadcn/ui](https://ui.shadcn.com/), [Recharts](https://recharts.org/) and [Lucide](https://lucide.dev/) icons. Hosted on the free tiers of [Render](https://render.com/), [Vercel](https://vercel.com/) and [Neon](https://neon.com/). Vehicles, plates (all start with `ZZ`), drivers and costs are generated fictional data.
 
-## Development
-
-Run Ruff automatically on every commit with [pre-commit](https://pre-commit.com/) (already a dev dependency):
-
-```bash
-uv run pre-commit install          # once per clone: adds the git hook
-uv run pre-commit run --all-files  # optional: check the whole repository now
-```
-
-The hooks call the Ruff version pinned in `uv.lock`, so local commits and CI never disagree. When a hook fixes a file, the commit stops: review the changes, `git add` them and commit again.
-
-## Logging
-
-- **Format:** one JSON object per line when `ENV=production` (`timestamp`, `level`, `logger`, `message`, `request_id` and event fields); readable text otherwise.
-- **Request ids:** every response carries an `X-Request-ID` header. A caller-supplied id (up to 64 characters of letters, digits, `.`, `_`, `-`) is reused; otherwise one is generated. All log lines of a request include it.
-- **Access log:** one `request completed` line per request with method, path (never the query string), status and duration.
-- **Unexpected errors:** the full traceback is logged; the client only gets `500` with `{"error": {"code": "internal_error", "message": "Internal server error"}}` and the request id to quote.
-
-## Deploy
-
-The API runs on [Render](https://render.com/) Free as a Docker web service, against the Neon Free database.
-
-### How it works
-
-- **Image** ([`Dockerfile`](Dockerfile)): multi-stage build. uv installs only the runtime dependencies from `uv.lock` in a build stage; the final `python:3.12-slim` image holds the interpreter, the virtualenv and the code, and runs as a non-root user. [`.dockerignore`](.dockerignore) is an allowlist, so `.env`, `.venv`, `.git` and tests never enter the build.
-- **Start:** the container runs `python -m app.scripts.start`, which applies pending migrations (`alembic upgrade head`, on `DATABASE_URL_DIRECT`) and then starts uvicorn on `$PORT` (default 8000). Render Free has no pre-deploy command, so this happens on every start; when the schema is already current it is a no-op. **If the migration fails, the process exits with status 1 and the server never starts.**
-- **CI:** every push and pull request also builds the image and starts it against an empty PostgreSQL, failing unless the migration runs and `/health` answers. A broken Dockerfile or entrypoint shows up in CI, not on Render.
-- **Blueprint** ([`render.yaml`](render.yaml)): one free web service in Ohio (the same AWS region as the Neon database), health check on `/health`, auto-deploy after CI passes. Secret variables are declared with `sync: false`: Render asks for them on the first sync and they live only in its dashboard.
-
-### First deploy
-
-1. Render dashboard → **New → Blueprint** → select this repository. Confirm the plan is **Free**.
-2. Fill in the prompted variables: `DATABASE_URL` (Neon pooled), `DATABASE_URL_DIRECT` (Neon direct), `JWT_SECRET` (a long random value, e.g. `uv run python -c "import secrets; print(secrets.token_hex(64))"`), `CORS_ORIGINS` (the dashboard origin, comma-separated) and the seed users' variables.
-3. Deploy. The logs show the migration, then `Uvicorn running`.
-4. Load the demo data once from a machine with the Neon URLs in `.env`: `uv run python -m app.scripts.seed` (idempotent).
-
-### Run the image locally
-
-```bash
-docker compose up -d db
-docker build -t fleet-manager-api .
-docker run --rm -p 8000:8000 --network fleet-manager_default \
-  -e DATABASE_URL=postgresql://fleet:fleet@db:5432/fleet \
-  -e DATABASE_URL_DIRECT=postgresql://fleet:fleet@db:5432/fleet \
-  -e JWT_SECRET=any-local-test-value \
-  fleet-manager-api
-curl http://127.0.0.1:8000/health
-```
-
-The image sets `ENV=production` (JSON logs, and a real `JWT_SECRET` is required).
-
-### Free-tier limitations
-
-- **Sleeps after 15 minutes without traffic.** The next request wakes it up. Measured on 2026-11-23 after 21 idle minutes: the first `GET /health` took **22.4 s** (warm: ~0.2-0.6 s), and the first login after that **3.0 s**, because Neon's compute also suspends after 5 idle minutes and Argon2 runs on a shared CPU. Render documents wake-ups of up to about a minute.
-- **Ephemeral disk:** nothing written to the container's filesystem survives a restart or redeploy. All state lives in PostgreSQL.
-- **750 free instance hours per month**, shared by every free service in the workspace. One service running all month uses about 744.
-- **512 MB of RAM:** a single uvicorn worker (about 70 MB at idle).
-- **Client IPs:** requests reach the app through Cloudflare and Render's internal load balancer, and Render appends to a client-supplied `X-Forwarded-For` instead of replacing it. Uvicorn therefore trusts only private networks and Cloudflare's published ranges ([`app/core/proxies.py`](app/core/proxies.py)) and takes the rightmost untrusted entry as the client, so a spoofed header cannot dodge the login rate limit. If Cloudflare adds ranges, the list needs updating; until then, affected clients share a rate-limit bucket rather than escaping it.
+[MIT](LICENSE) © 2026 Awsthyn
