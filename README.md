@@ -31,6 +31,10 @@ uv run uvicorn app.main:app --reload
 
 The API is then available at http://127.0.0.1:8000, with interactive docs at http://127.0.0.1:8000/docs and a liveness check at http://127.0.0.1:8000/health.
 
+## Dashboard
+
+A Next.js dashboard in [`web/`](web/) (overview metrics and costs chart, vehicles, drivers, one-click read-only demo), deployed on Vercel Hobby. The browser never calls the API directly: the Next.js server does, with tokens kept in httpOnly cookies. Setup, scripts and design notes: [web/README.md](web/README.md).
+
 ## API
 
 Interactive documentation lives at `/docs`.
@@ -186,7 +190,7 @@ The image sets `ENV=production` (JSON logs, and a real `JWT_SECRET` is required)
 
 ### Free-tier limitations
 
-- **Sleeps after 15 minutes without traffic.** The next request wakes it up, which takes about a minute; Neon's compute also suspends after 5 minutes idle and adds a slower first connection.
+- **Sleeps after 15 minutes without traffic.** The next request wakes it up. Measured on 2026-11-23 after 21 idle minutes: the first `GET /health` took **22.4 s** (warm: ~0.2-0.6 s), and the first login after that **3.0 s**, because Neon's compute also suspends after 5 idle minutes and Argon2 runs on a shared CPU. Render documents wake-ups of up to about a minute.
 - **Ephemeral disk:** nothing written to the container's filesystem survives a restart or redeploy. All state lives in PostgreSQL.
 - **750 free instance hours per month**, shared by every free service in the workspace. One service running all month uses about 744.
 - **512 MB of RAM:** a single uvicorn worker (about 70 MB at idle).
