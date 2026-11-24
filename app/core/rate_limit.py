@@ -44,6 +44,16 @@ class SlidingWindowRateLimiter:
             self._prune(now)
         return None
 
+    def refund(self, key: str) -> None:
+        """Give back the most recent attempt recorded for ``key``.
+
+        Lets callers count only some outcomes (e.g. failed logins) while still reserving a slot
+        up front, so a burst of concurrent attempts cannot all slip in before any is counted.
+        """
+        attempts = self._attempts.get(key)
+        if attempts:
+            attempts.pop()
+
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_seconds
         stale = [key for key, attempts in self._attempts.items() if attempts[-1] <= cutoff]

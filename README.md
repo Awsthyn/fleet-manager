@@ -52,7 +52,7 @@ Every `/api/v1` resource requires a bearer token; only `/health`, `/docs`, `/ope
 | `viewer` | `GET` on every resource |
 | `admin` | everything |
 
-The seed script creates `demo@fleet.dev` (viewer, password from `DEMO_PASSWORD`) and an admin (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). Passwords are hashed with Argon2 and never stored in the repository. Login is limited to 10 attempts per minute per client IP (kept in process memory, which is enough for a single Render Free instance). Deactivating a user invalidates their outstanding tokens; tokens are otherwise stateless, so there is no per-token logout.
+The seed script creates `demo@fleet.dev` (viewer, password from `DEMO_PASSWORD`) and an admin (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). Passwords are hashed with Argon2 and never stored in the repository. Login is limited to 10 failed attempts per minute per client IP (kept in process memory, which is enough for a single Render Free instance). Successful logins do not count, so the dashboard's server, which signs in every demo visitor from the same address, is not throttled; each attempt still reserves a slot while it is checked, so a burst of concurrent guesses cannot get past the limit. Deactivating a user invalidates their outstanding tokens; tokens are otherwise stateless, so there is no per-token logout.
 
 ### Resources
 

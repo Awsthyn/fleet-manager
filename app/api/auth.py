@@ -56,18 +56,33 @@ def new_login_rate_limiter() -> SlidingWindowRateLimiter:
     return SlidingWindowRateLimiter(LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS)
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 async def limit_login_attempts(request: Request) -> None:
-    """At most 10 login attempts per client IP per minute (in-process, see app/core/rate_limit).
+    """At most 10 failed login attempts per client IP per minute (in-process, see
+    app/core/rate_limit).
+
+    Every attempt reserves a slot when it arrives (concurrent guesses cannot slip past the
+    limit while they are being checked); a successful login gives it back with
+    ``refund_login_attempt``. Only failures count, so the dashboard's server, which signs in
+    every demo visitor from the same address, is not throttled by legitimate logins.
 
     Behind Render's proxy the client IP comes from X-Forwarded-For, resolved by Uvicorn's proxy
     headers support against the trusted proxies in app/core/proxies.py (see app/scripts/start.py).
     """
     limiter: SlidingWindowRateLimiter = request.app.state.login_rate_limiter
-    client_ip = request.client.host if request.client else "unknown"
-    retry_after = limiter.hit(client_ip)
+    retry_after = limiter.hit(_client_ip(request))
     if retry_after is not None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts, try again later",
             headers={"Retry-After": str(max(1, round(retry_after)))},
         )
+
+
+def refund_login_attempt(request: Request) -> None:
+    """A login succeeded: give back the slot ``limit_login_attempts`` reserved for it."""
+    limiter: SlidingWindowRateLimiter = request.app.state.login_rate_limiter
+    limiter.refund(_client_ip(request))
