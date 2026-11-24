@@ -288,3 +288,18 @@ def test_openapi_declares_the_password_flow_for_authorize_button() -> None:
     assert flows["password"]["tokenUrl"] == LOGIN
     assert vehicles_get["security"] == [{"OAuth2PasswordBearer": []}]
     assert "security" not in schema["paths"][LOGIN]["post"]
+
+
+async def test_only_failed_logins_count_toward_the_limit(
+    anonymous_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Guards shared-IP clients (the dashboard server): rejects throttling successful logins."""
+    await make_user(db_session)
+
+    successes = [await login(anonymous_client, "viewer@fleet.test") for _ in range(15)]
+    failures = [await login(anonymous_client, "viewer@fleet.test", "guess") for _ in range(10)]
+    blocked = await login(anonymous_client, "viewer@fleet.test")
+
+    assert {r.status_code for r in successes} == {200}
+    assert {r.status_code for r in failures} == {401}
+    assert blocked.status_code == 429

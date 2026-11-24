@@ -1,9 +1,9 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.api.auth import CurrentUser, limit_login_attempts
+from app.api.auth import CurrentUser, limit_login_attempts, refund_login_attempt
 from app.api.deps import AuthServiceDep
 from app.schemas.auth import AccessTokenResponse, RefreshRequest, TokenPairResponse, UserRead
 from app.schemas.common import RATE_LIMITED, UNAUTHORIZED, VALIDATION
@@ -18,11 +18,12 @@ router = APIRouter(prefix="/auth", tags=["auth"], responses={**VALIDATION, **UNA
     responses={**RATE_LIMITED},
 )
 async def login(
-    auth: AuthServiceDep, form: Annotated[OAuth2PasswordRequestForm, Depends()]
+    request: Request, auth: AuthServiceDep, form: Annotated[OAuth2PasswordRequestForm, Depends()]
 ) -> TokenPairResponse:
     """Form fields `username` (the email) and `password`. Returns a 15-minute access token and
-    a 7-day refresh token. Limited to 10 attempts per minute per IP."""
+    a 7-day refresh token. Limited to 10 failed attempts per minute per IP."""
     pair = await auth.login(form.username, form.password)
+    refund_login_attempt(request)
     return TokenPairResponse(
         access_token=pair.access.token,
         expires_in=pair.access.expires_in,

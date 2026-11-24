@@ -58,3 +58,18 @@ def test_idle_clients_are_forgotten_once_too_many_are_tracked(
     limiter.hit("e")  # fifth key: over the limit, so idle keys are pruned
 
     assert set(limiter._attempts) == {"d", "e"}  # pyright: ignore[reportPrivateUsage]
+
+
+def test_refund_gives_back_the_reserved_slot() -> None:
+    """Guards failure-only counting: rejects a refund that leaves the slot used or goes negative."""
+    clock = FakeClock()
+    limiter = SlidingWindowRateLimiter(max_attempts=2, window_seconds=60, clock=clock)
+
+    limiter.refund("never-seen")  # nothing recorded: a no-op, not an error
+    for _ in range(5):
+        assert limiter.hit("ip") is None
+        limiter.refund("ip")
+    limiter.hit("ip")
+    limiter.hit("ip")
+
+    assert limiter.hit("ip") == 60
