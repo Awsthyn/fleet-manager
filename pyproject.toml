@@ -43,6 +43,8 @@ packages = ["app"]
 target-version = "py312"
 line-length = 100
 src = ["."]
+# The Next.js dashboard: its node_modules ship stray .py files that are not ours.
+extend-exclude = ["web"]
 
 [tool.ruff.lint]
 select = [
